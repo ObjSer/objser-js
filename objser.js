@@ -87,68 +87,120 @@ var objser = new (function() {
 
 		var i = s.length;
 
-		function encode(v) {
-			var type = typeof v;
-			if (type === "string") {
-				if (v.length == 0) s[i++] = _estring;
-				else {
-					s[i] = _vstring;
-					stringToUtf8ByteArray(v, s);
-					var len = s.length - i - 1;
-					if (len <= 15) s[i] = _fstring | len;
-					else s[s.length] = 0;
-					i = s.length;
-				}
-			}			
-			else if (Array.isArray(v)) {
-				if (v.length == 0) s[i++] = _earray;
-				else {
-					var vv = v.length > 31;
-					s[i++] = vv ? _varray : _farray | v.length;
-					for (var j = 0; j < v.length; ++j) encode(v[j]);
-					i = s.length;
-					if (vv) s[i++] = _sentinel;
-				}
-			}
-			else if (type === "object") {
-				var a = [], j = 0;
-				for (k in v) a[j++] = k, a[j++] = v[k];
-				if (!a.length) s[i++] = _emap;
-				else {
-					s[i++] = _map;
-					encode(a);
-				}
-			}
+		var indexed = [], writers = [], nextid = 0;
+
+		function index(v) {
+			if (v.hasOwnProperty("__objser_id")) return v.__objser_id;
 			else {
-				return false;
+				var id = v.__objser_id = nextid++;
+				indexed[id] = v;
+				var type = typeof v;
+				if (type === "string") {
+					writers[id] = writer(writeString, v);
+				}
+				else if (Array.isArray(v)) {
+					var a = [];
+					for (var j = 0; j < v.length; ++j) a[j] = index(v[j]);
+					writers[id] = writer(writeArray, a);
+				}
+				else if (type === "object") {
+					var a = [], j = 0;
+					for (k in v) if (k !== "__objser_id") {
+						a[j++] = index(k);
+						a[j++] = index(v[k]);
+					}
+					writers[id] = writer(writeMap, a);
+				}
+				else {
+					writers[id] = function() { print("who knows " + JSON.stringify(v)); };
+				}
+				return id;
 			}
-			return s;
 		}
 
-		encode(v);
+		function writer(f, obj) {
+			return function() { f(obj); };
+		}
+
+		function writeString(str) {
+			if (str.length == 0) s[i++] = _estring;
+			else {
+				s[i] = _vstring;
+				stringToUtf8ByteArray(str, s);
+				var len = s.length - i - 1;
+				if (len <= 15) s[i] = _fstring | len;
+				else s[s.length] = 0;
+				i = s.length;
+			}
+		}
+
+		function writeArray(a) {
+			if (a.length == 0) s[i++] = _earray;
+			else {
+				var vv = a.length > 31;
+				s[i++] = vv ? _varray : _farray | a.length;
+				for (var j = 0; j < a.length; ++j) writeRef(a[j]);
+				i = s.length;
+				if (vv) s[i++] = _sentinel;
+			}
+		}
+
+		function writeMap(a) {
+			if (!a.length) s[i++] = _emap;
+			else {
+				s[i++] = _map;
+				writeArray(a);
+			}
+		}
+
+		function writeRef(id) {
+			var v = nextid - id - 1;
+			if (v <= 0x3f) s[i++] = _ref6 | v;
+			else if (v <= 0xff) s[i++] = _ref8, s[i++] = v;
+			else if (v <= 0xffff) s[i++] = _ref16;
+			else if (v <= 0xffffffff) s[i++] = _ref32;
+			else return print("rip");
+		}
+
+		index(v);
+
+		for (var j = nextid; j --> 0;) {
+			writers[j]();
+			delete indexed[j].__objser_id;
+		}
+
 		return s;
 	}
 
 	function deserialise(s, i) {
 		var objects = [];
 		for (var id = 0; i < s.length; ++id) objects[id] = read();
-		return objects[objects.length-1];
+		var root = objects[objects.length-1];
+		return resolve(root);
+
+		function ref(i) {
+			this.resolve = function() {
+				return objects[i];
+			};
+		}
 
 		function read() {
-			var v = s[i++], fv;
+			var v = s[i++], fv = v;
 			// check ranges first
-			if (0x00 <= v && v <= 0x3f) fv = v, v = $ref6;
-			else if (0x80 <= v && v <= 0xbf) fv = v & 0x3f, v = $pint6;
-			else if (0xe0 <= v && v <= 0xff) fv = v, v = $nint5;
-			else if (0x71 <= v && v <= 0x7f) fv = v & 0xf, v = $fstring;
-			else if (0x61 <= v && v <= 0x6f) fv = v & 0xf, v = $fdata;
-			else if (0x41 <= v && v <= 0x5f) fv = v & 0x1f, v = $farray;
-			else if (0xd8 <= v && v <= 0xdf) v = $reserved;
-			switch (v) {
+			if (0x00 <= v && v <= 0x3f) fv = $ref6;
+			else if (0x80 <= v && v <= 0xbf) fv = $pint6, v &= 0x3f;
+			else if (0xe0 <= v && v <= 0xff) fv = $nint5;
+			else if (0x71 <= v && v <= 0x7f) fv = $fstring, v &= 0xf;
+			else if (0x61 <= v && v <= 0x6f) fv = $fdata, v &= 0xf;
+			else if (0x41 <= v && v <= 0x5f) fv = $farray, v &= 0x1f;
+			else if (0xd8 <= v && v <= 0xdf) fv = $reserved;
+			switch (fv) {
 				case $ref6:
+					return new ref(v);
 				case _ref8:
 				case _ref16:
 				case _ref32:
+					return "referenced";
 				case $pint6:
 				case $nint5:
 				case _false:
@@ -166,7 +218,7 @@ var objser = new (function() {
 				case _float32:
 				case _float64:
 				case $fstring:
-					var len = fv;
+					var len = v;
 					var str = utf8ByteArrayToString(s, i, len);
 					i += len;
 					return str;
@@ -187,7 +239,7 @@ var objser = new (function() {
 				case _vdata32:
 				case _edata:
 				case $farray:
-					var len = fv, a = [];
+					var len = v, a = [];
 					for (var j = 0; j < len; ++j) a[j] = read();
 					return a;
 				case _varray:
@@ -198,17 +250,34 @@ var objser = new (function() {
 				case _earray:
 					return [];
 				case _map:
-					var a = read(), m = {};
-					for (var j = 0; j < a.length; j += 2) {
-						m[a[j]] = a[j+1];
-					}
-					return m;
+					var a = read();
+					// TODO: check that a is an array
+					return { __objser_map_elements: a };
 				case _emap:
-					return {};
+					return { __objser_map_elements: [] };
 				case _sentinel:
 					return undefined; // different from null
 				case $reserved:
 			}
+		}
+
+		function resolve(v) {
+			// avoid adding to the call stack unnecessarily
+			while (v instanceof ref) v = v.resolve();
+			var type = typeof v;
+			if (Array.isArray(v)) {
+				for (var j = 0; j < v.length; ++j) v[j] = resolve(v[j]);
+			}
+			else if (type === "object") {
+				if (v.hasOwnProperty("__objser_map_elements")) {
+					var a = v.__objser_map_elements;
+					delete v.__objser_map_elements;
+					for (var j = 0; j < a.length; j += 2) {
+						v[resolve(a[j])] = resolve(a[j+1]);
+					}
+				}
+			}
+			return v;
 		}
 	}
 
