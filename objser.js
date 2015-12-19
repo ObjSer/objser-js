@@ -1,3 +1,9 @@
+/*!
+ * objser.js
+ * Copyright (c) 2015 Greg Omelaenko
+ * License: https://github.com/ObjSer/objser-js/blob/master/LICENSE
+ */
+
 "use strict";
 
 var objser = new (function() {
