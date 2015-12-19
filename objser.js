@@ -2,26 +2,6 @@
 
 var objser = new (function() {
 
-    // https://closure-library.googlecode.com/git-history/docs/local_closure_goog_crypt_crypt.js.source.html
-    function stringToUtf8ByteArray(str, out) {
-        if (!out) out = [];
-        var p = out.length;
-        for (var i = 0; i < str.length; i++) {
-            var c = str.charCodeAt(i);
-            if (c < 128) {
-                out[p++] = c;
-            } else if (c < 2048) {
-                out[p++] = (c >> 6) | 192;
-                out[p++] = (c & 63) | 128;
-            } else {
-                out[p++] = (c >> 12) | 224;
-                out[p++] = ((c >> 6) & 63) | 128;
-                out[p++] = (c & 63) | 128;
-            }
-        }
-        return out;
-    }
-
     function utf8ByteArrayToString(bytes, pos, count) {
         var out = "", end = bytes.length;
         if (!pos) pos = 0;
@@ -42,15 +22,6 @@ var objser = new (function() {
         return out;
     }
 
-
-    function bytesToInt(bytes, pos, n) {
-        var out = 0;
-        for (var i = 0, mul = 1; i < n; ++i, mul *= 256) {
-            out += bytes[pos+i] * mul;
-        }
-        return out;
-    }
-    
 
     var _ref6     = 0x00, // 0x00 – 0x3f
         $ref6     = 0x00,
@@ -145,6 +116,28 @@ var objser = new (function() {
             return function() { f(obj); };
         }
 
+        function writeInt8(n) {
+            write(n);
+        }
+
+        function writeInt16(n) {
+            write(n & 0xff, n >> 8);
+        }
+
+        function writeInt32(n) {
+            write(n & 0xff,         (n >> 8) & 0xff,
+                  (n >> 16) & 0xff, n >>> 24);
+        }
+
+        function writeInt64(n) {
+            var h = Math.floor(n / 0x100000000),
+                l = n & 0xffffffff;
+            write(l & 0xff,         (l >> 8) & 0xff,
+                  (l >> 16) & 0xff, (l >> 24) & 0xff,
+                  h & 0xff,         (h >> 8) & 0xff,
+                  (h >> 16) & 0xff, (h >> 24) & 0xff);
+        }            
+
         function writeNumber(n) {
             if (n % 1 === 0) {
                 // integer
@@ -154,26 +147,20 @@ var objser = new (function() {
                     // negative numbers somehow magically work with shifts without special handling
                     var neg = n < 0;
                     if (-0x80 <= n && n <= 0xff) {
-                        write(neg ? _int8 : _uint8, n);
+                        write(neg ? _int8 : _uint8);
+                        writeInt8(n);
                     }
                     else if (-0x8000 <= n && n <= 0xffff) {
-                        write(neg ? _int16 : _uint16,
-                              n & 0xff, n >> 8);
+                        write(neg ? _int16 : _uint16);
+                        writeInt16(n);
                     }
                     else if (-0x80000000 <= n && n <= 0xffffffff) {
-                        write(neg ? _int32 : _uint32,
-                              n & 0xff,         (n >> 8) & 0xff,
-                              (n >> 16) & 0xff, n >>> 24);
+                        write(neg ? _int32 : _uint32);
+                        writeInt32(n);
                     }
                     else {
-                        var h = Math.floor(n / 0x100000000),
-                            l = n & 0xffffffff;
-                        // if (neg) h += 0x100000000;
-                        write(neg ? _int64 : _uint64,
-                              l & 0xff,         (l >> 8) & 0xff,
-                              (l >> 16) & 0xff, (l >> 24) & 0xff,
-                              h & 0xff,         (h >> 8) & 0xff,
-                              (h >> 16) & 0xff, (h >> 24) & 0xff);
+                        write(neg ? _int64 : _uint64);
+                        writeInt64(n);
                     }
                 }
             }
@@ -188,14 +175,28 @@ var objser = new (function() {
         }
 
         function writeString(str) {
-            if (str.length == 0) s[i++] = _estring;
+            if (str.length == 0) write(_estring);
             else {
-                s[i] = _vstring;
-                stringToUtf8ByteArray(str, s);
-                var len = s.length - i - 1;
-                if (len <= 15) s[i] = _fstring | len;
-                else s[s.length] = 0;
-                i = s.length;
+                write(_vstring);
+                var pi = i;
+                // https://closure-library.googlecode.com/git-history/docs/local_closure_goog_crypt_crypt.js.source.html
+                for (var j = 0; j < str.length; ++j) {
+                    var c = str.charCodeAt(j);
+                    if (c < 128) {
+                        write(c);
+                    } else if (c < 2048) {
+                        write((c >> 6) | 192,
+                              (c & 63) | 128);
+                    } else {
+                        write((c >> 12) | 224,
+                              ((c >> 6) & 63) | 128,
+                              (c & 63) | 128);
+                    }
+                }
+
+                var len = i - pi;
+                if (len <= 15) s[pi-1] = _fstring | len;
+                else s[i++] = 0;
             }
         }
 
@@ -221,9 +222,9 @@ var objser = new (function() {
         function writeRef(id) {
             var v = nextid - id - 1;
             if (v <= 0x3f) s[i++] = _ref6 | v;
-            else if (v <= 0xff) s[i++] = _ref8, s[i++] = v;
-            else if (v <= 0xffff) s[i++] = _ref16;
-            else if (v <= 0xffffffff) s[i++] = _ref32;
+            else if (v <= 0xff) s[i++] = _ref8, writeInt8(v);
+            else if (v <= 0xffff) s[i++] = _ref16, writeInt16(v);
+            else if (v <= 0xffffffff) s[i++] = _ref32, writeInt32(v);
             else return print("rip");
         }
 
@@ -264,10 +265,11 @@ var objser = new (function() {
                 case $ref6:
                     return new ref(v);
                 case _ref8:
-                    return new ref(s[i++]);
+                    return new ref(readInt8(false));
                 case _ref16:
+                    return new ref(readInt16(false));
                 case _ref32:
-                    return "referenced";
+                    return new ref(readInt32(false));
 
                 case $pint6:
                     return v & 0x7f;
@@ -282,45 +284,35 @@ var objser = new (function() {
                 case _nil:
                     return null;
 
-                case _int8: signed = true;
+                case _int8:
+                    return readInt8(true);
                 case _uint8:
-                    var n = s[i++];
-                    if (signed && n > 0x7f) n -= 0x100;
-                    return n;
-                case _int16: signed = true;
+                    return readInt8(false);
+                case _int16:
+                    return readInt16(true);
                 case _uint16:
-                    var n = s[i++] | (s[i++] << 8);
-                    if (signed && n > 0x7fff) n -= 0x10000;
-                    return n;
-                case _int32: signed = true;
+                    return readInt16(false);
+                case _int32:
+                    return readInt32(true);
                 case _uint32:
-                    // add the last byte to avoid the js signed 32-bit integer bullshit
-                    var n = (s[i++] | (s[i++] << 8) | (s[i++] << 16)) + s[i++] * 0x1000000;
-                    if (signed && n > 0x7fffffff) n -= 0x100000000;
-                    return n;
-                case _int64: signed = true;
+                    return readInt32(false);
+                case _int64:
+                    return readInt64(true);
                 case _uint64:
-                    var l = (s[i++] | (s[i++] << 8) | (s[i++] << 16)) + s[i++] * 0x1000000,
-                        h = (s[i++] | (s[i++] << 8) | (s[i++] << 16)) + s[i++] * 0x1000000;
-                    if (signed && h > 0x7fffffff) h -= 0x100000000;
-                    var n = l + h * 0x100000000;
-                    return n;
+                    return readInt64(false);
 
                 case _float32:
                 case _float64:
                 case $fstring:
-                    var len = v;
-                    var str = utf8ByteArrayToString(s, i, len);
-                    i += len;
-                    return str;
+                    return readString(v);
                 case _vstring:
                     var len;
                     for (var j = i; j < s.length; ++j) if (!s[j]) {
                         len = j - i;
                         break;
                     }
-                    var str = utf8ByteArrayToString(s, i, len);
-                    i += len + 1;
+                    var str = readString(len);
+                    ++i;
                     return str;
                 case _estring:
                     return "";
@@ -349,6 +341,39 @@ var objser = new (function() {
                 case _sentinel:
                     return undefined; // different from null
                 case $reserved:
+            }
+
+            function readInt8(signed) {
+                var n = s[i++];
+                if (signed && n > 0x7f) n -= 0x100;
+                return n;
+            }
+
+            function readInt16(signed) {
+                var n = s[i++] | (s[i++] << 8);
+                if (signed && n > 0x7fff) n -= 0x10000;
+                return n;
+            }                
+
+            function readInt32(signed) {
+                // add the last byte to avoid the js signed 32-bit integer bullshit
+                var n = (s[i++] | (s[i++] << 8) | (s[i++] << 16)) + s[i++] * 0x1000000;
+                if (signed && n > 0x7fffffff) n -= 0x100000000;
+                return n;
+            }                
+
+            function readInt64(signed) {
+                var l = (s[i++] | (s[i++] << 8) | (s[i++] << 16)) + s[i++] * 0x1000000,
+                    h = (s[i++] | (s[i++] << 8) | (s[i++] << 16)) + s[i++] * 0x1000000;
+                if (signed && h > 0x7fffffff) h -= 0x100000000;
+                var n = l + h * 0x100000000;
+                return n;
+            }
+
+            function readString(len) {
+                var str = utf8ByteArrayToString(s, i, len);
+                i += len;
+                return str;
             }
         }
 

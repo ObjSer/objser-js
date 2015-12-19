@@ -10,5 +10,4 @@ The following restrictions are imposed on objects that can be serialised:
 - Properties beginning with `__objser_` should not be used, to avoid conflict with the implementation
 - Objects must not contain functions
 - Nil, floating point numbers, and data are not implemented.
-- References greater than 8 bits are not implemented.
 
