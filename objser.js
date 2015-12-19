@@ -62,7 +62,7 @@ var objser = new (function() {
                 var id = nextid++;
                 indexed[id] = v;
                 var type = typeof v;
-                switch(typeof v) {
+                switch(type) {
                     case "number":
                         writers[id] = writer(writeNumber, v);
                         break;
@@ -93,7 +93,7 @@ var objser = new (function() {
                         }
                         break;
                     default:
-                        writers[id] = function() { print("who knows " + JSON.stringify(v)); };
+                        throw "Unrecognised type '" + type + "'.";
                 }
                 return id;
             }
@@ -157,6 +157,7 @@ var objser = new (function() {
             }
             else {
                 // float
+                throw "Floats are not yet supported.";
             }
         }
 
@@ -336,6 +337,9 @@ var objser = new (function() {
                 case _sentinel:
                     return undefined; // different from null
                 case $reserved:
+                    throw "Reserved byte value " + v + " used.";
+                default:
+                    throw "Unrecognised byte value " + v + ".";
             }
 
             function readInt8(signed) {
