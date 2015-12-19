@@ -73,8 +73,7 @@ var objser = new (function() {
                         writers[id] = writer(writeString, v);
                         break;
                     case "object":
-                        // allow coercion of undefined
-                        if (v == null) {
+                        if (v === null) {
                             writers[id] = writeNil;
                             break;
                         }
