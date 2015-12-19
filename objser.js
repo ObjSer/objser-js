@@ -72,37 +72,44 @@ var objser = new (function() {
         var indexed = [], writers = [], nextid = 0;
 
         function index(v) {
-            if (v.hasOwnProperty("__objser_id")) return v.__objser_id;
+            if (v && v.hasOwnProperty("__objser_id")) return v.__objser_id;
             else {
                 var id = nextid++;
                 indexed[id] = v;
                 var type = typeof v;
-                if (type === "object") v.__objser_id = id;
-
-                if (type === "number") {
-                    writers[id] = writer(writeNumber, v);
-                }
-                else if (type === "boolean") {
-                    writers[id] = writer(writeBoolean, v);
-                }
-                else if (type === "string") {
-                    writers[id] = writer(writeString, v);
-                }
-                else if (Array.isArray(v)) {
-                    var a = [];
-                    for (var j = 0; j < v.length; ++j) a[j] = index(v[j]);
-                    writers[id] = writer(writeArray, a);
-                }
-                else if (type === "object") {
-                    var a = [], j = 0;
-                    for (var k in v) if (k !== "__objser_id") {
-                        a[j++] = index(k);
-                        a[j++] = index(v[k]);
-                    }
-                    writers[id] = writer(writeMap, a);
-                }
-                else {
-                    writers[id] = function() { print("who knows " + JSON.stringify(v)); };
+                switch(typeof v) {
+                    case "number":
+                        writers[id] = writer(writeNumber, v);
+                        break;
+                    case "boolean":
+                        writers[id] = writer(writeBoolean, v);
+                        break;
+                    case "string":
+                        writers[id] = writer(writeString, v);
+                        break;
+                    case "object":
+                        // allow coercion of undefined
+                        if (v == null) {
+                            writers[id] = writeNil;
+                            break;
+                        }
+                        v.__objser_id = id;
+                        if (Array.isArray(v)) {
+                            var a = [];
+                            for (var j = 0; j < v.length; ++j) a[j] = index(v[j]);
+                            writers[id] = writer(writeArray, a);
+                        }
+                        else {
+                            var a = [], j = 0;
+                            for (var k in v) if (k !== "__objser_id") {
+                                a[j++] = index(k);
+                                a[j++] = index(v[k]);
+                            }
+                            writers[id] = writer(writeMap, a);
+                        }
+                        break;
+                    default:
+                        writers[id] = function() { print("who knows " + JSON.stringify(v)); };
                 }
                 return id;
             }
@@ -174,6 +181,10 @@ var objser = new (function() {
             else write(_false);
         }
 
+        function writeNil() {
+            write(_nil);
+        }
+
         function writeString(str) {
             if (str.length == 0) write(_estring);
             else {
@@ -232,7 +243,7 @@ var objser = new (function() {
 
         for (var j = nextid; j --> 0;) {
             writers[j]();
-            delete indexed[j].__objser_id;
+            if (indexed[j] && indexed[j].hasOwnProperty("__objser_id")) delete indexed[j].__objser_id;
         }
 
         return s;
@@ -385,7 +396,7 @@ var objser = new (function() {
                 for (var j = 0; j < v.length; ++j) v[j] = resolve(v[j]);
             }
             else if (type === "object") {
-                if (v.hasOwnProperty("__objser_map_elements")) {
+                if (v && v.hasOwnProperty("__objser_map_elements")) {
                     var a = v.__objser_map_elements;
                     delete v.__objser_map_elements;
                     for (var j = 0; j < a.length; j += 2) {
