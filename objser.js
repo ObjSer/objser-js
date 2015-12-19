@@ -2,27 +2,6 @@
 
 var objser = new (function() {
 
-    function utf8ByteArrayToString(bytes, pos, count) {
-        var out = "", end = bytes.length;
-        if (!pos) pos = 0;
-        if (count) end = pos + count;
-        while (pos < end) {
-            var c1 = bytes[pos++];
-            if (c1 < 128) {
-                out += String.fromCharCode(c1);
-            } else if (c1 > 191 && c1 < 224) {
-                var c2 = bytes[pos++];
-                out += String.fromCharCode((c1 & 31) << 6 | c2 & 63);
-            } else {
-                var c2 = bytes[pos++];
-                var c3 = bytes[pos++];
-                out += String.fromCharCode((c1 & 15) << 12 | (c2 & 63) << 6 | c3 & 63);
-            }
-        }
-        return out;
-    }
-
-
     var _ref6     = 0x00, // 0x00 – 0x3f
         $ref6     = 0x00,
         _ref8     = 0x40,
@@ -382,9 +361,22 @@ var objser = new (function() {
             }
 
             function readString(len) {
-                var str = utf8ByteArrayToString(s, i, len);
-                i += len;
-                return str;
+                // https://closure-library.googlecode.com/git-history/docs/local_closure_goog_crypt_crypt.js.source.html
+                var out = "", end = i + len;
+                while (i < end) {
+                    var c1 = s[i++];
+                    if (c1 < 128) {
+                        out += String.fromCharCode(c1);
+                    } else if (c1 > 191 && c1 < 224) {
+                        var c2 = s[i++];
+                        out += String.fromCharCode((c1 & 31) << 6 | c2 & 63);
+                    } else {
+                        var c2 = s[i++];
+                        var c3 = s[i++];
+                        out += String.fromCharCode((c1 & 15) << 12 | (c2 & 63) << 6 | c3 & 63);
+                    }
+                }
+                return out;
             }
         }
 
